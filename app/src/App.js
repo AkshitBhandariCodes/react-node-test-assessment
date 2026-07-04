@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
+import Pusher from 'pusher-js';
 import './App.css';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
 
 function App() {
   const [messages, setMessages] = useState([]);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
   const [username, setUsername] = useState('');
   const [messageText, setMessageText] = useState('');
   const [selectedImage, setSelectedImage] = useState(null);
@@ -17,12 +21,62 @@ function App() {
 
   useEffect(() => {
     fetchMessages();
+
+    if (process.env.REACT_APP_PUSHER_KEY) {
+      const pusher = new Pusher(process.env.REACT_APP_PUSHER_KEY, {
+        cluster: process.env.REACT_APP_PUSHER_CLUSTER,
+      });
+
+      const channel = pusher.subscribe('chat');
+      
+      channel.bind('new-message', (newMessage) => {
+        setMessages((prev) => {
+          if (prev.some((msg) => msg.id === newMessage.id)) return prev;
+          return [...prev, newMessage];
+        });
+      });
+
+      channel.bind('message-deleted', (deletedData) => {
+        setMessages((prev) => prev.filter((msg) => msg.id !== deletedData.id));
+        setSearchResults((prev) => prev.filter((msg) => msg.id !== deletedData.id));
+      });
+
+      return () => {
+        channel.unbind_all();
+        channel.unsubscribe();
+      };
+    }
   }, []);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchQuery.trim()) {
+        performSearch(searchQuery);
+      } else {
+        setIsSearching(false);
+        setSearchResults([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  const performSearch = async (query) => {
+    try {
+      setIsSearching(true);
+      const response = await axios.get(`${API_BASE_URL}/api/messages/search?q=${encodeURIComponent(query)}`);
+      setSearchResults(response.data.messages || []);
+    } catch (err) {
+      console.error('Error searching messages:', err);
+    }
+  };
+
+  const displayedMessages = isSearching ? searchResults : messages;
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [displayedMessages]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -139,6 +193,7 @@ function App() {
     try {
       await axios.delete(`${API_BASE_URL}/api/messages/${messageId}`);
       setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
+      setSearchResults((prev) => prev.filter((msg) => msg.id !== messageId));
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to delete message');
       console.error('Error deleting message:', err);
@@ -155,18 +210,26 @@ function App() {
       <header className="App-header">
         <h1>💬 Chat App</h1>
         <p>Send messages and share images</p>
+        <input
+          type="text"
+          placeholder="Search messages..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="search-input"
+          style={{ padding: '8px', marginTop: '10px', borderRadius: '4px', border: 'none', width: '80%', maxWidth: '400px' }}
+        />
       </header>
 
       <main className="chat-container">
         <div className="chat-messages" id="messages-container">
-          {loading && messages.length === 0 ? (
+          {loading && displayedMessages.length === 0 && !isSearching ? (
             <div className="loading">Loading messages...</div>
-          ) : messages.length === 0 ? (
+          ) : displayedMessages.length === 0 ? (
             <div className="no-messages">
-              No messages yet. Start the conversation!
+              {isSearching ? 'No results found.' : 'No messages yet. Start the conversation!'}
             </div>
           ) : (
-            messages.map((msg) => (
+            displayedMessages.map((msg) => (
               <div key={msg.id} className="message-item">
                 <div className="message-header">
                   <span className="message-username">{msg.username}</span>
