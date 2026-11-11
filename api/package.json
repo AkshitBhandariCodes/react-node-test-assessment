@@ -4,8 +4,8 @@
   "description": "Backend for real-time chat assessment project",
   "main": "server.js",
   "scripts": {
-    "start": "node init && node server.js",
-    "dev": "node init && nodemon server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "keywords": [
     "express",
